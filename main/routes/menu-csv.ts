@@ -294,10 +294,14 @@ router.post('/import/categories', (req: Request, res: Response) => {
     const db = getDatabase();
     let created = 0, skipped = 0;
     const errors: string[] = [];
+    const warnings: string[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (!r.name) { errors.push(`Row ${i + 2}: missing name`); continue; }
+      if (!r.name) {
+        r.name = `Unnamed Category ${i + 1}`;
+        warnings.push(`Row ${i + 2}: missing name — imported as "${r.name}"`);
+      }
 
       const exists = db
         .prepare('SELECT id FROM categories WHERE name = ? AND deleted_at IS NULL')
@@ -313,7 +317,7 @@ router.post('/import/categories', (req: Request, res: Response) => {
       created++;
     }
 
-    res.json({ created, skipped, errors });
+    res.json({ created, skipped, errors, warnings });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -337,20 +341,26 @@ router.post('/import/products', (req: Request, res: Response) => {
 
     let created = 0, updated = 0, skipped = 0;
     const errors: string[] = [];
+    const warnings: string[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (!r.name) { errors.push(`Row ${i + 2}: missing name`); continue; }
+      if (!r.name) {
+        r.name = `Unnamed Product ${i + 1}`;
+        warnings.push(`Row ${i + 2}: missing name — imported as "${r.name}"`);
+      }
 
-      const price = parseFloat(r.price);
-      if (isNaN(price)) { errors.push(`Row ${i + 2} (${r.name}): invalid price "${r.price}"`); continue; }
+      let price = parseFloat(r.price);
+      if (isNaN(price)) {
+        warnings.push(`Row ${i + 2} (${r.name}): invalid price "${r.price}" — defaulted to 0`);
+        price = 0;
+      }
 
       let categoryId: string | null = null;
       if (r.category) {
         categoryId = catMap[r.category.toLowerCase()] ?? null;
         if (!categoryId) {
-          errors.push(`Row ${i + 2} (${r.name}): category "${r.category}" not found — import categories first`);
-          continue;
+          warnings.push(`Row ${i + 2} (${r.name}): category "${r.category}" not found — imported without category`);
         }
       }
 
@@ -401,7 +411,7 @@ router.post('/import/products', (req: Request, res: Response) => {
       created++;
     }
 
-    res.json({ created, updated, skipped, errors });
+    res.json({ created, updated, skipped, errors, warnings });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -418,17 +428,28 @@ router.post('/import/addons', (req: Request, res: Response) => {
     const db = getDatabase();
     let groupsCreated = 0, addonsCreated = 0, skipped = 0;
     const errors: string[] = [];
+    const warnings: string[] = [];
     const groupCache: Record<string, string> = {};
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (!r.group_name || !r.addon_name) {
-        errors.push(`Row ${i + 2}: missing group_name or addon_name`); continue;
+      if (!r.group_name && !r.addon_name) {
+        warnings.push(`Row ${i + 2}: missing group_name and addon_name — row skipped`);
+        continue;
+      }
+      if (!r.group_name) {
+        r.group_name = 'General';
+        warnings.push(`Row ${i + 2}: missing group_name — defaulted to "General"`);
+      }
+      if (!r.addon_name) {
+        r.addon_name = `Addon ${i + 1}`;
+        warnings.push(`Row ${i + 2}: missing addon_name — imported as "${r.addon_name}"`);
       }
 
-      const price = parseFloat(r.price);
+      let price = parseFloat(r.price);
       if (isNaN(price)) {
-        errors.push(`Row ${i + 2} (${r.group_name}/${r.addon_name}): invalid price "${r.price}"`); continue;
+        warnings.push(`Row ${i + 2} (${r.group_name}/${r.addon_name}): invalid price "${r.price}" — defaulted to 0`);
+        price = 0;
       }
 
       const key = r.group_name.toLowerCase();
@@ -461,7 +482,7 @@ router.post('/import/addons', (req: Request, res: Response) => {
       addonsCreated++;
     }
 
-    res.json({ groups_created: groupsCreated, addons_created: addonsCreated, skipped, errors });
+    res.json({ groups_created: groupsCreated, addons_created: addonsCreated, skipped, errors, warnings });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
