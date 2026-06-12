@@ -62,6 +62,87 @@ function isTruthy(v: string) {
   return ['yes', 'true', '1'].includes((v || '').toLowerCase());
 }
 
+// ─── CSV pre-import cleaner ───────────────────────────────────────────────────
+// Runs on the raw CSV string BEFORE parsing. Handles messy Excel/Sheets exports.
+function cleanCsv(raw: string): string {
+  // 1. Strip UTF-8 BOM (Excel adds this)
+  let text = raw.replace(/^\uFEFF/, '');
+
+  // 2. Normalise line endings
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  const lines = text.split('\n');
+  if (lines.length === 0) return text;
+
+  // 3. Extract header to know which columns are numeric / boolean
+  const headerLine = lines[0];
+  const headers = headerLine.split(',').map((h) => h.trim().toLowerCase().replace(/^"|"$/g, ''));
+
+  const NUMERIC_COLS  = new Set(['price', 'cost', 'tax_rate', 'cashback_percent', 'sort_order',
+                                  'group_min_select', 'group_max_select']);
+  const BOOLEAN_COLS  = new Set(['is_active', 'group_required']);
+
+  const cleanedLines: string[] = [headerLine]; // keep original header casing
+
+  for (let li = 1; li < lines.length; li++) {
+    const line = lines[li];
+    if (!line.trim()) continue; // drop fully empty lines
+
+    // Split respecting quoted fields
+    const fields = line.split(',');
+    const cleaned: string[] = [];
+    let fieldIdx = 0;
+
+    for (let fi = 0; fi < fields.length; fi++) {
+      let val = fields[fi];
+
+      // Re-join fields that were split inside quotes
+      while (val.startsWith('"') && !val.endsWith('"') && fi + 1 < fields.length) {
+        fi++;
+        val += ',' + fields[fi];
+      }
+
+      // Strip surrounding quotes
+      if (val.startsWith('"') && val.endsWith('"')) {
+        val = val.slice(1, -1).replace(/""/g, '"');
+      }
+
+      // Trim whitespace
+      val = val.trim();
+
+      const col = headers[fieldIdx] ?? '';
+
+      // Numeric columns: strip currency symbols, commas used as thousands separators
+      if (NUMERIC_COLS.has(col)) {
+        val = val.replace(/[₹$€£¥,]/g, '').trim();
+        if (val === '' || val === '-') val = '0';
+      }
+
+      // Boolean columns: normalise to yes/no
+      if (BOOLEAN_COLS.has(col)) {
+        const lv = val.toLowerCase();
+        if (['true', '1', 'y', 'yes'].includes(lv))        val = 'yes';
+        else if (['false', '0', 'n', 'no', ''].includes(lv)) val = 'no';
+      }
+
+      // Re-quote if value contains comma or quote
+      if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+        val = '"' + val.replace(/"/g, '""') + '"';
+      }
+
+      cleaned.push(val);
+      fieldIdx++;
+    }
+
+    // Skip rows where every field is empty (all whitespace/commas)
+    if (cleaned.every((v) => v === '' || v === '""')) continue;
+
+    cleanedLines.push(cleaned.join(','));
+  }
+
+  return cleanedLines.join('\n');
+}
+
 // Canonicalise a tag from CSV so variants like "Non-Veg", "nonveg", "NON VEG"
 // are all stored as the standard key (e.g. "non_veg").
 function normalizeTag(raw: string): string {
@@ -207,7 +288,7 @@ router.post('/import/categories', (req: Request, res: Response) => {
     const { csv } = req.body as { csv: string };
     if (!csv) return res.status(400).json({ error: 'No CSV data provided' });
 
-    const rows = toObjects(parseCSV(csv));
+    const rows = toObjects(parseCSV(cleanCsv(csv)));
     if (!rows.length) return res.status(400).json({ error: 'CSV has no data rows' });
 
     const db = getDatabase();
@@ -243,7 +324,7 @@ router.post('/import/products', (req: Request, res: Response) => {
     const { csv } = req.body as { csv: string };
     if (!csv) return res.status(400).json({ error: 'No CSV data provided' });
 
-    const rows = toObjects(parseCSV(csv));
+    const rows = toObjects(parseCSV(cleanCsv(csv)));
     if (!rows.length) return res.status(400).json({ error: 'CSV has no data rows' });
 
     const db = getDatabase();
@@ -331,7 +412,7 @@ router.post('/import/addons', (req: Request, res: Response) => {
     const { csv } = req.body as { csv: string };
     if (!csv) return res.status(400).json({ error: 'No CSV data provided' });
 
-    const rows = toObjects(parseCSV(csv));
+    const rows = toObjects(parseCSV(cleanCsv(csv)));
     if (!rows.length) return res.status(400).json({ error: 'CSV has no data rows' });
 
     const db = getDatabase();
