@@ -62,6 +62,26 @@ function isTruthy(v: string) {
   return ['yes', 'true', '1'].includes((v || '').toLowerCase());
 }
 
+// Canonicalise a tag from CSV so variants like "Non-Veg", "nonveg", "NON VEG"
+// are all stored as the standard key (e.g. "non_veg").
+function normalizeTag(raw: string): string {
+  const s = raw.toLowerCase().replace(/[\s\-_]+/g, '');
+  if (s === 'nonveg' || s === 'nonvegetarian') return 'non_veg';
+  if (s === 'veg'    || s === 'vegetarian')    return 'veg';
+  if (s === 'vegan')                           return 'vegan';
+  if (s === 'egg'    || s === 'eggetarian')    return 'egg';
+  if (s === 'spicy'  || s === 'hot')           return 'spicy';
+  if (s === 'containsnuts' || s === 'nuts')    return 'contains_nuts';
+  if (s === 'glutenfree'   || s === 'gf')      return 'gluten_free';
+  if (s === 'dairyfree'    || s === 'df')      return 'dairy_free';
+  if (s === 'newarrival'   || s === 'new')     return 'new_arrival';
+  if (s === 'bestseller'   || s === 'best')    return 'bestseller';
+  if (s === 'organic')                         return 'organic';
+  if (s === 'fragrancefree')                   return 'fragrance_free';
+  if (s === 'limited')                         return 'limited';
+  return raw.toLowerCase().replace(/[\s\-]+/g, '_');
+}
+
 // ─── Templates ───────────────────────────────────────────────────────────────
 
 const TEMPLATES: Record<string, string> = {
@@ -255,7 +275,7 @@ router.post('/import/products', (req: Request, res: Response) => {
 
       let tagsJson: string | null = null;
       if (r.tags) {
-        const arr = r.tags.split(',').map((t: string) => t.trim()).filter(Boolean);
+        const arr = r.tags.split(',').map((t: string) => normalizeTag(t.trim())).filter(Boolean);
         if (arr.length) tagsJson = JSON.stringify(arr);
       }
 
