@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import PaymentModal from '@/components/pos/PaymentModal';
 import CreateCustomerModal from '@/components/pos/CreateCustomerModal';
 import AddonModal from '@/components/pos/AddonModal';
+import RefundModal from '@/components/orders/RefundModal';
 import { shareBillViaWhatsApp, sendBillViaFlo } from '@/lib/whatsapp-share';
 import { useConfirm } from '@/hooks/use-confirm';
 import type { OrderItem, Table, Product, Customer, Addon } from '@/lib/types';
@@ -156,6 +157,7 @@ export default function OrdersPage() {
   const [now, setNow] = useState(() => Date.now());
   const [tabFilter, setTabFilter] = useState<FilterType>('active');
   const [paymentBill, setPaymentBill] = useState<Bill | null>(null);
+  const [refundModal, setRefundModal] = useState<{ order: Order; bills: Bill[] } | null>(null);
   const [tables, setTables] = useState<Table[]>([]);
   const [kdsEnabled, setKdsEnabled] = useState(true);
   const { confirm, ConfirmDialog } = useConfirm();
@@ -1403,6 +1405,22 @@ export default function OrdersPage() {
                         {tOrders('addItem')}
                       </Button>
                     )}
+                    {isOwnerOrManager && (() => {
+                      const orderBills = order.bills?.length ? order.bills : (order.bill ? [order.bill] : []);
+                      const paidBills = orderBills.filter((b) => Number(b.paid_amount) > 0 && b.payment_status !== 'refunded');
+                      if (paidBills.length === 0) return null;
+                      return (
+                        <Button
+                          variant="outline"
+                          onClick={() => setRefundModal({ order, bills: paidBills })}
+                          size="sm"
+                          className="flex-1 justify-center border-purple-300 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
+                        >
+                          <RotateCcw size={14} className="me-1.5" />
+                          {tOrders('refundButton')}
+                        </Button>
+                      );
+                    })()}
                     {order.type === 'dine_in' && !['completed', 'cancelled'].includes(order.status) && (
                       <Button
                         variant="outline"
@@ -1450,6 +1468,16 @@ export default function OrdersPage() {
           onClose={() => setPaymentBill(null)}
           onPaid={handlePaymentComplete}
           onBillUpdate={(updated) => setPaymentBill(updated)}
+        />
+      )}
+
+      {/* Refund Modal */}
+      {refundModal && (
+        <RefundModal
+          order={refundModal.order}
+          bills={refundModal.bills}
+          onClose={() => setRefundModal(null)}
+          onRefunded={() => { setRefundModal(null); fetchOrders(); }}
         />
       )}
 
