@@ -10,6 +10,7 @@ import {
   normalizeChargeAmount,
 } from '../services/tax';
 import { applyPayableRounding } from '../services/tax-engine';
+import { calculateOrderTotals } from '../services/orders';
 import { notifyKdsUpdate, notifyOrderUpdated } from '../services/kds';
 import { cloudSync } from '../services/cloud-sync';
 import { validateOrderNotes, validateItemNotes, validateProductQuantity } from './orders-validation';
@@ -775,27 +776,14 @@ router.post('/:id/items', orderWriteRateLimit, requireRole(...ROLE_ACCESS.sales)
         }
       }
 
-      // BUG #3 FIX: Filter out cancelled items from total recalculation
-      const activeItems = db.prepare("SELECT * FROM order_items WHERE order_id = ? AND status != 'cancelled'").all(req.params.id) as any[];
-      let subtotal = 0;
-      let totalTax = 0;
-      let exclusiveTax = 0;
-      const allTaxBreakdowns: any[] = [];
-      const allTaxSnapshots: (string | null)[] = [];
-      for (const item of activeItems) {
-        subtotal += item.subtotal;
-        totalTax += item.tax_amount;
-        if (item.tax_type !== 'inclusive') {
-          exclusiveTax += item.tax_amount;
-        }
-        if (item.tax_breakdown) {
-          try {
-            const breakdown = JSON.parse(item.tax_breakdown);
-            if (Array.isArray(breakdown)) allTaxBreakdowns.push(breakdown);
-          } catch { }
-        }
-        allTaxSnapshots.push(item.tax_snapshot || null);
-      }
+      // BUG #3 FIX: Filter out terminal items from total recalculation.
+      const {
+        subtotal,
+        totalTax,
+        exclusiveTax,
+        allTaxBreakdowns,
+        allTaxSnapshots,
+      } = calculateOrderTotals(db, req.params.id as string);
 
       // BUG #12 FIX: Preserve order-level discount (scale percentage proportionally)
       const currency = getTenantCurrency();
@@ -1264,24 +1252,12 @@ router.patch('/:id/discount', orderWriteRateLimit, requireRole(...ROLE_ACCESS.ow
       }
 
       // Recalculate tax from item-level data to avoid compounding on repeated discount edits.
-      const activeItems = db.prepare("SELECT * FROM order_items WHERE order_id = ? AND status != 'cancelled'").all(req.params.id) as any[];
-      let freshTax = 0;
-      let exclusiveTax = 0;
-      const allTaxBreakdowns: any[] = [];
-      const allTaxSnapshots: (string | null)[] = [];
-      for (const item of activeItems) {
-        freshTax += item.tax_amount || 0;
-        if (item.tax_type !== 'inclusive') {
-          exclusiveTax += item.tax_amount || 0;
-        }
-        if (item.tax_breakdown) {
-          try {
-            const breakdown = JSON.parse(item.tax_breakdown);
-            if (Array.isArray(breakdown)) allTaxBreakdowns.push(breakdown);
-          } catch { }
-        }
-        allTaxSnapshots.push(item.tax_snapshot || null);
-      }
+      const {
+        totalTax: freshTax,
+        exclusiveTax,
+        allTaxBreakdowns,
+        allTaxSnapshots,
+      } = calculateOrderTotals(db, req.params.id as string);
       let newTaxAmount = freshTax;
       let newExclusiveTax = exclusiveTax;
       let taxRatio = 1;
@@ -1490,27 +1466,14 @@ router.patch('/:id/items/:itemId/discount', orderWriteRateLimit, requireRole(...
         newTaxSnapshotJson, taxResult.tax_type, newTotal, now(), req.params.itemId,
       );
 
-      // Update order totals excluding cancelled, voided, or refunded items.
-      const allItems = db.prepare("SELECT * FROM order_items WHERE order_id = ? AND status NOT IN ('cancelled', 'voided', 'void_adjustment', 'refunded')").all(req.params.id) as any[];
-      let orderSubtotal = 0;
-      let orderTax = 0;
-      let exclusiveOrderTax = 0;
-      const allTaxBreakdowns: any[] = [];
-      const allTaxSnapshots: (string | null)[] = [];
-      for (const i of allItems) {
-        orderSubtotal += i.subtotal;
-        orderTax += i.tax_amount;
-        if (i.tax_type !== 'inclusive') {
-          exclusiveOrderTax += i.tax_amount;
-        }
-        if (i.tax_breakdown) {
-          try {
-            const breakdown = JSON.parse(i.tax_breakdown);
-            if (Array.isArray(breakdown)) allTaxBreakdowns.push(breakdown);
-          } catch { }
-        }
-        allTaxSnapshots.push(i.tax_snapshot || null);
-      }
+      // Update order totals excluding terminal items.
+      const {
+        subtotal: orderSubtotal,
+        totalTax: orderTax,
+        exclusiveTax: exclusiveOrderTax,
+        allTaxBreakdowns,
+        allTaxSnapshots,
+      } = calculateOrderTotals(db, req.params.id as string);
 
       // Recalculate order-level discount proportionally on new subtotal
       const existingDiscountAmount = order.discount_amount || 0;
