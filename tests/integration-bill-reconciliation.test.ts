@@ -159,6 +159,15 @@ async function main() {
     const orderAfterAdd = addItemsRes.data.order;
     assert(orderAfterAdd.total > orderBTotal, `order total increased (₹${orderBTotal} → ₹${orderAfterAdd.total})`);
 
+    // The existing unpaid bill must stay in sync before it is re-generated.
+    const billAfterAddBeforeRegeneration = await api(baseUrl, `/api/bills/${billIdB}`, { headers: authHeader });
+    assertEqual(billAfterAddBeforeRegeneration.status, 200, 'existing bill remains readable after adding items');
+    assertEqual(
+      billAfterAddBeforeRegeneration.data.bill.subtotal,
+      orderAfterAdd.subtotal,
+      `bill subtotal (₹${billAfterAddBeforeRegeneration.data.bill.subtotal}) matches order subtotal (₹${orderAfterAdd.subtotal}) after adding items`,
+    );
+
     // Re-generate bill — it should sync with the updated order total
     const billAfterAdd = await api(baseUrl, '/api/bills/generate', {
       method: 'POST',
@@ -170,6 +179,42 @@ async function main() {
     // Verify the bill reflects the added items
     const syncedBill = billAfterAdd.data.bill;
     assertEqual(syncedBill.total, orderAfterAdd.total, `bill total (₹${syncedBill.total}) matches order total (₹${orderAfterAdd.total}) after adding items`);
+
+    // ═══ Scenario C: Item Discount After Bill Was Generated ═══
+    console.log('\n─── Scenario C: Item Discount After Bill ───');
+    const orderC = await api(baseUrl, '/api/orders', {
+      method: 'POST',
+      body: {
+        type: 'takeaway',
+        items: [{ product_id: 'prod-recon-1', quantity: 1 }],
+      },
+      headers: authHeader,
+    });
+    assertEqual(orderC.status, 201, 'order C created');
+    const orderIdC = orderC.data.order.id;
+    const itemC = orderC.data.order.items[0];
+
+    const billC = await api(baseUrl, '/api/bills/generate', {
+      method: 'POST',
+      body: { order_id: orderIdC },
+      headers: authHeader,
+    });
+    assertEqual(billC.status, 201, 'bill C created before item discount');
+
+    const itemDiscountRes = await api(baseUrl, `/api/orders/${orderIdC}/items/${itemC.id}/discount`, {
+      method: 'PATCH',
+      body: { discount_type: 'percentage', discount_value: 10 },
+      headers: authHeader,
+    });
+    assertEqual(itemDiscountRes.status, 200, 'item discount applied after bill creation');
+    const orderAfterItemDiscount = (await api(baseUrl, `/api/orders/${orderIdC}`, { headers: authHeader })).data.order;
+    const billAfterItemDiscount = await api(baseUrl, `/api/bills/${billC.data.bill.id}`, { headers: authHeader });
+    assertEqual(billAfterItemDiscount.status, 200, 'existing bill remains readable after item discount');
+    assertEqual(
+      billAfterItemDiscount.data.bill.subtotal,
+      orderAfterItemDiscount.subtotal,
+      `bill subtotal (₹${billAfterItemDiscount.data.bill.subtotal}) matches order subtotal (₹${orderAfterItemDiscount.subtotal}) after item discount`,
+    );
 
   } finally {
     server.close();
