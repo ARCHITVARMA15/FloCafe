@@ -609,8 +609,10 @@ router.get('/insights', requireRole(...ROLE_ACCESS.ownerManager), (req: Request,
 // Reuses the snapshot pipeline from `cash-closures.ts` so the X read and
 // the stored Z snapshot never drift apart. Same role gate as the other
 // owner/manager reports. Refund attribution matches financial-summary
-// (paid_at) for display totals; the cash-only expected figure uses refunds
-// by `refunds.created_at` for drawer reality.
+// (paid_at) for display totals; the cash-only expected figure includes active
+// movements and uses refunds by `refunds.created_at` for drawer reality. The
+// opening float is reported separately and intentionally excluded from X's
+// expected figure.
 //
 // UNIT CONVENTIONS for the X envelope (do not rename fields):
 //   * grossCollected, refunded, netCollected, paymentMethods[].total,
@@ -620,11 +622,11 @@ router.get('/insights', requireRole(...ROLE_ACCESS.ownerManager), (req: Request,
 //     client must convert the counted input to cents before subtracting).
 //
 // X vs Z expected (deliberate gap, not a bug):
-//   X's expectedCashCents excludes the opening float — the float is only
-//   captured at close. Same-day X and Z expected values therefore differ
-//   by exactly opening_float_cents. Consumers must not compare them
-//   directly; X is the live drawer expectation, Z is the point-in-time
-//   snapshot that bakes in the float.
+//   X's expectedCashCents excludes the opening float, which is reported
+//   separately. Same-day X and Z expected values therefore differ by exactly
+//   opening_float_cents. Consumers must not compare them directly; X is the
+//   live drawer expectation, Z is the point-in-time snapshot that bakes in the
+//   float.
 router.get('/x-report', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
   try {
     const today = reportToday();
@@ -671,7 +673,16 @@ router.get('/x-report', requireRole(...ROLE_ACCESS.ownerManager), (req: Request,
           orderCount: row.orderCount,
         })),
         taxComponents: aggregates.taxComponents,
-        expectedCashCents: aggregates.cashSalesCents - aggregates.cashRefundsByCreatedAtCents,
+        openingFloatCents: aggregates.cashMovements.find((movement) => movement.movement_type === 'opening_float')?.amount_cents ?? null,
+        payInCents: aggregates.payInCents,
+        payOutCents: aggregates.payOutCents,
+        safeDropCents: aggregates.safeDropCents,
+        cashMovements: aggregates.cashMovements,
+        expectedCashCents: aggregates.cashSalesCents
+          + aggregates.payInCents
+          - aggregates.payOutCents
+          - aggregates.safeDropCents
+          - aggregates.cashRefundsByCreatedAtCents,
         // F3: server-resolved prior close; null fields when no prior close
         // exists. The frontend only shows the "no prior close" hint when
         // this is genuinely null (never on transport error).
@@ -716,6 +727,9 @@ router.get('/z-report', requireRole(...ROLE_ACCESS.ownerManager), (req: Request,
         expected_cash_cents: row.expected_cash_cents,
         counted_cash_cents: row.counted_cash_cents,
         variance_cents: row.variance_cents,
+        pay_in_cents: row.pay_in_cents,
+        pay_out_cents: row.pay_out_cents,
+        safe_drop_cents: row.safe_drop_cents,
         gross_collected_cents: row.gross_collected_cents,
         refunded_cents: row.refunded_cents,
         net_collected_cents: row.net_collected_cents,
@@ -724,6 +738,7 @@ router.get('/z-report', requireRole(...ROLE_ACCESS.ownerManager), (req: Request,
         payment_methods: JSON.parse(row.payment_methods_json || '[]'),
         staff_sales: JSON.parse(row.staff_sales_json || '[]'),
         tax_components: JSON.parse(row.tax_components_json || '[]'),
+        cash_movements: JSON.parse(row.cash_movements_json || '[]'),
         z_number: row.z_number,
         closed_by: row.closed_by,
         closed_by_name: userRow?.name ?? row.closed_by,

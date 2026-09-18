@@ -1882,9 +1882,10 @@ export function buildTestPage(paperWidth: string = '80mm', cutMode: PrinterCutMo
 /**
  * Build the ESC/POS bytes for a Z-report (cierre de caja) from a stored
  * `cash_closures` row. Day-close, no bill — sections in spec print order:
- * header → Z number + business date + period → opening float → sales by
- * payment method → refunds → tax breakdown → staff sales → expected /
- * counted / variance (variance emphasized) → operator + signature → footer.
+ * header → Z number + business date + period → opening float → cash
+ * movements → sales by payment method → refunds → tax breakdown → staff
+ * sales → expected / counted / variance (variance emphasized) → operator +
+ * signature → footer.
  * The byte builder never touches the drawer pulse; that is appended by
  * `printZReport` (the route layer) so the byte form is reusable for the
  * WebUSB `bytes: number[]` branch where the renderer dispatches.
@@ -1932,6 +1933,9 @@ export function buildZReportBody(z: any, language?: string, printer?: { columns?
     periodStart: localTime(z?.period_start),
     periodEnd: localTime(z?.period_end),
     openingFloatCents: Number(z?.opening_float_cents) || 0,
+    payInCents: Number(z?.pay_in_cents) || 0,
+    payOutCents: Number(z?.pay_out_cents) || 0,
+    safeDropCents: Number(z?.safe_drop_cents) || 0,
     paymentMethods: (Array.isArray(z?.payment_methods) ? z.payment_methods : []).map((row: any) => ({
       method: String(row?.method || ''),
       count: Number(row?.count) || 0,
@@ -1990,6 +1994,12 @@ export function buildZReportBody(z: any, language?: string, printer?: { columns?
 
   pushZReportHeading(sections, zDocument.openingFloat.label, zContext, true);
   sections.push('{FINANCIAL}' + rightAlign(formatAmount(zDocument.openingFloat.cents), cols));
+  sections.push('');
+
+  pushZReportSectionHeading(sections, zDocument.cashMovements.heading, zContext);
+  pushZReportLabelValue(sections, zDocument.cashMovements.payIn.label, formatAmount(zDocument.cashMovements.payIn.cents), zContext);
+  pushZReportLabelValue(sections, zDocument.cashMovements.payOut.label, formatAmount(zDocument.cashMovements.payOut.cents), zContext);
+  pushZReportLabelValue(sections, zDocument.cashMovements.safeDrop.label, formatAmount(zDocument.cashMovements.safeDrop.cents), zContext);
   sections.push('');
 
   pushZReportSectionHeading(sections, zDocument.payments.heading, zContext);
