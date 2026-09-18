@@ -2545,6 +2545,9 @@
     "status": {
       "delivered": "Livré",
       "failed": "Échec",
+      "notSent": "Aucun envoi enregistré",
+      "partial": "Partiellement envoyé",
+      "pending": "En attente",
       "queued": "En attente",
       "read": "Lu",
       "sent": "Envoyé",

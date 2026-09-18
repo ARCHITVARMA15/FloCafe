@@ -2545,6 +2545,9 @@
     "status": {
       "delivered": "Delivered",
       "failed": "Failed",
+      "notSent": "No recorded send",
+      "partial": "Partially sent",
+      "pending": "Pending",
       "queued": "Queued",
       "read": "Read",
       "sent": "Sent",

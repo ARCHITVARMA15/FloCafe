@@ -181,6 +181,7 @@ export interface Order {
   customer?: Customer;
   bill?: Bill;
   bills?: Bill[];
+  whatsapp_receipt_status?: 'sent' | 'partial' | 'pending' | 'failed' | null;
 }
 
 export interface OrderItem {

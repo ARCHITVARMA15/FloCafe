@@ -2545,6 +2545,9 @@
     "status": {
       "delivered": "Naihatid",
       "failed": "Nabigo",
+      "notSent": "Walang naitalang pagpapadala",
+      "partial": "Bahagyang naipadala",
+      "pending": "Nakabinbin",
       "queued": "Naka-queue",
       "read": "Nabasa",
       "sent": "Naipadala",

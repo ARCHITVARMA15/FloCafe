@@ -2545,6 +2545,9 @@
     "status": {
       "delivered": "İletildi",
       "failed": "Başarısız",
+      "notSent": "Kayıtlı gönderim yok",
+      "partial": "Kısmen gönderildi",
+      "pending": "Beklemede",
       "queued": "Kuyrukta",
       "read": "Okundu",
       "sent": "Gönderildi",
