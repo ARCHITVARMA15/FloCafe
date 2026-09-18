@@ -11,6 +11,7 @@ import {
 } from '../services/tax';
 import { applyPayableRounding } from '../services/tax-engine';
 import { calculateOrderTotals } from '../services/orders';
+import { adjustProductStock } from '../services/inventory';
 import { notifyKdsUpdate, notifyOrderUpdated } from '../services/kds';
 import { cloudSync } from '../services/cloud-sync';
 import { validateOrderNotes, validateItemNotes, validateProductQuantity } from './orders-validation';
@@ -514,10 +515,6 @@ router.post('/', orderWriteRateLimit, requireRole(...ROLE_ACCESS.sales), (req: R
           throw new Error(`Product ${item.product_id} not found`);
         }
 
-        if (product.track_inventory && product.stock_quantity < item.quantity) {
-          throw new Error(`Insufficient stock for ${product.name}`);
-        }
-
         const unitPrice = parseFloat(product.price);
         const quantity = item.quantity;
         // Item discounts are applied via dedicated discount routes, not creation.
@@ -571,8 +568,15 @@ router.post('/', orderWriteRateLimit, requireRole(...ROLE_ACCESS.sales), (req: R
         insertOrderItemAddons(db, insertItemResult.lastInsertRowid, item.addons, itemCreatedAt);
 
         if (product.track_inventory) {
-          db.prepare('UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = ? WHERE id = ?')
-            .run(quantity, now(), product.id);
+          adjustProductStock(db, {
+            productId: product.id,
+            quantityDelta: -quantity,
+            movementType: 'sale',
+            referenceType: 'order_item',
+            referenceId: String(insertItemResult.lastInsertRowid),
+            actorUserId: authenticatedUserId,
+            createdAt: itemCreatedAt,
+          });
         }
       }
 
@@ -724,10 +728,6 @@ router.post('/:id/items', orderWriteRateLimit, requireRole(...ROLE_ACCESS.sales)
         if (!product) {
           throw new Error(`Product ${item.product_id} not found`);
         }
-        if (product.track_inventory && product.stock_quantity < item.quantity) {
-          throw new Error(`Insufficient stock for ${product.name}`);
-        }
-
         const unitPrice = parseFloat(product.price);
         const quantity = item.quantity;
         // Item discounts are applied via dedicated discount routes, not creation.
@@ -771,8 +771,15 @@ router.post('/:id/items', orderWriteRateLimit, requireRole(...ROLE_ACCESS.sales)
         insertedItemIds.push(insertItemResult.lastInsertRowid);
 
         if (product.track_inventory) {
-          db.prepare('UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = ? WHERE id = ?')
-            .run(quantity, now(), product.id);
+          adjustProductStock(db, {
+            productId: product.id,
+            quantityDelta: -quantity,
+            movementType: 'sale',
+            referenceType: 'order_item',
+            referenceId: String(insertItemResult.lastInsertRowid),
+            actorUserId: idempotencyUserId,
+            createdAt: itemCreatedAt,
+          });
         }
       }
 
@@ -1001,8 +1008,15 @@ router.patch('/:id/status', orderWriteRateLimit, requireRole(...ROLE_ACCESS.orde
           for (const item of eligibleItems) {
             const product = db.prepare('SELECT * FROM products WHERE id = ?').get(item.product_id) as any;
             if (product && item.inventory_deducted_quantity > 0) {
-              db.prepare('UPDATE products SET stock_quantity = stock_quantity + ?, updated_at = ? WHERE id = ?')
-                .run(item.inventory_deducted_quantity, nowStr, product.id);
+              adjustProductStock(db, {
+                productId: product.id,
+                quantityDelta: item.inventory_deducted_quantity,
+                movementType: 'cancel_restore',
+                referenceType: 'order_item',
+                referenceId: `${item.id}:${item.updated_at}`,
+                reason: reason || 'Order cancelled',
+                actorUserId: authUser.userId,
+              });
             }
           }
 
